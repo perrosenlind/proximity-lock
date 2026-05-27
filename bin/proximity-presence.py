@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+#!/usr/bin/python3
 """Emit live BT presence for given MACs by reading macOS's BT daemon state.
 
 Usage: proximity-presence.py <mac1> [<mac2> ...]

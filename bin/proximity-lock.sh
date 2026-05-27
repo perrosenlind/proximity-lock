@@ -93,28 +93,29 @@ scan_and_update_state() {
     snap="$(snapshot)"
 
     for i in "${!TRUSTED_MACS[@]}"; do
-        mac="$(normalize_mac "${TRUSTED_MACS[$i]}")"
+        mac="$(normalize_mac "${TRUSTED_MACS[i]}")"
         matched=0
         while IFS=$'\t' read -r addr rssi name; do
             [ -z "$addr" ] && continue
             if [ "$addr" = "$mac" ]; then
-                name="$(printf '%s' "$name" | tr -d '\r\n' | tr '"=`$\\' '_____')"
-                [ -n "$name" ] && TRUSTED_NAMES[$i]="$name"
+                # Strip control chars and chars that would break KEY="value" parsing.
+                name="$(printf '%s' "$name" | LC_ALL=C tr -d $'\r\n"=')"
+                [ -n "$name" ] && TRUSTED_NAMES[i]="$name"
                 if [ "$rssi" -ge "$MIN_RSSI" ] 2>/dev/null; then
-                    DEVICE_PRESENT[$i]=1
-                    DEVICE_RSSI[$i]="$rssi"
-                    DEVICE_LAST_SEEN[$i]=$(date +%s)
+                    DEVICE_PRESENT[i]=1
+                    DEVICE_RSSI[i]="$rssi"
+                    DEVICE_LAST_SEEN[i]=$(date +%s)
                 else
-                    DEVICE_PRESENT[$i]=0
-                    DEVICE_RSSI[$i]="$rssi"
+                    DEVICE_PRESENT[i]=0
+                    DEVICE_RSSI[i]="$rssi"
                 fi
                 matched=1
                 break
             fi
         done <<< "$snap"
         if [ "$matched" -eq 0 ]; then
-            DEVICE_PRESENT[$i]=0
-            DEVICE_RSSI[$i]=""
+            DEVICE_PRESENT[i]=0
+            DEVICE_RSSI[i]=""
         fi
     done
 }

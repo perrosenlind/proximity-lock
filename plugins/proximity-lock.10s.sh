@@ -17,8 +17,17 @@ set -u
 
 STATUS="$HOME/Library/Application Support/proximity-lock/status.env"
 LOG="$HOME/Library/Logs/proximity-lock.log"
-PLIST_USER="$HOME/Library/LaunchAgents/se.local.proximitylock.plist"
 SCRIPT_USER="$HOME/bin/proximity-lock.sh"
+
+# Find an installed LaunchAgent plist for the daemon (any reverse-domain prefix).
+# Empty string if not installed yet.
+PLIST_USER=""
+for candidate in "$HOME"/Library/LaunchAgents/*proximitylock*.plist; do
+    if [ -f "$candidate" ]; then
+        PLIST_USER="$candidate"
+        break
+    fi
+done
 
 now=$(date +%s)
 FONT="font=Menlo size=12"
@@ -30,7 +39,11 @@ emit_missing() {
     echo "Status file missing:"
     echo "$STATUS | $FONT color=#888888"
     echo "---"
-    echo "Start daemon (launchctl load) | bash=/bin/launchctl param1=load param2=-w param3=$PLIST_USER terminal=false refresh=true"
+    if [ -n "$PLIST_USER" ]; then
+        echo "Start daemon (launchctl load) | bash=/bin/launchctl param1=load param2=-w param3=$PLIST_USER terminal=false refresh=true"
+    else
+        echo "No LaunchAgent plist found in ~/Library/LaunchAgents/ | $FONT color=#888888"
+    fi
     echo "Run in foreground (terminal) | bash=$SCRIPT_USER terminal=true"
     echo "Edit config… | bash=/usr/bin/open param1=-t param2=$SCRIPT_USER terminal=false"
 }
@@ -155,5 +168,7 @@ echo "Open log | bash=/usr/bin/open param1=-t param2=$LOG terminal=false"
 echo "Tail log (terminal) | bash=/usr/bin/tail param1=-f param2=$LOG terminal=true"
 echo "Edit config… | bash=/usr/bin/open param1=-t param2=$SCRIPT_USER terminal=false"
 echo "---"
-echo "Restart daemon | bash=/bin/bash param1=-c param2=\"launchctl unload '$PLIST_USER' 2>/dev/null; launchctl load -w '$PLIST_USER'\" terminal=false refresh=true"
+if [ -n "$PLIST_USER" ]; then
+    echo "Restart daemon | bash=/bin/bash param1=-c param2=\"launchctl unload '$PLIST_USER' 2>/dev/null; launchctl load -w '$PLIST_USER'\" terminal=false refresh=true"
+fi
 echo "Refresh | refresh=true"
