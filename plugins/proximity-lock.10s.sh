@@ -111,6 +111,7 @@ ICON_STYLES=(
 )
 
 ICON_STYLE=$(read_setting ICON_STYLE radio)
+BAR_DISPLAY=$(read_setting BAR_DISPLAY show)
 
 # ---------------------------------------------------------------- render
 now=$(date +%s)
@@ -122,7 +123,11 @@ emit_missing() {
     local pair sym color
     pair=$(icon_for "$ICON_STYLE" stale)
     sym=${pair%%|*}; color=${pair##*|}
-    echo "proximity | sfimage=$sym sfcolor=$color"
+    if [ "$BAR_DISPLAY" = "hide" ]; then
+        echo "· | size=11 color=#8e8e93"
+    else
+        echo "proximity | sfimage=$sym sfcolor=$color"
+    fi
     echo "---"
     echo "Daemon not running"
     echo "Status file missing | $DIM"
@@ -135,6 +140,8 @@ emit_missing() {
     fi
     echo "Run in foreground | sfimage=terminal bash=$SCRIPT_USER terminal=true"
     echo "Edit config… | sfimage=square.and.pencil bash=/usr/bin/open param1=-t param2=$SCRIPT_USER terminal=false"
+    echo "---"
+    emit_bar_visibility_menu "$BAR_DISPLAY"
     emit_icon_style_menu
 }
 
@@ -152,6 +159,18 @@ emit_icon_style_menu() {
             echo "--   $label | sfimage=$sym sfcolor=$color bash=$0 param1=--set param2=ICON_STYLE param3=$id terminal=false refresh=true"
         fi
     done
+}
+
+emit_bar_visibility_menu() {
+    local current="$1"
+    echo "Menu bar | sfimage=menubar.dock.rectangle $HEADER"
+    if [ "$current" = "show" ]; then
+        echo "--✓ Show icon | sfimage=eye.fill sfcolor=systemBlue bash=$0 param1=--set param2=BAR_DISPLAY param3=show terminal=false refresh=true"
+        echo "--   Hide (tiny dot remains, clickable) | sfimage=eye.slash bash=$0 param1=--set param2=BAR_DISPLAY param3=hide terminal=false refresh=true"
+    else
+        echo "--   Show icon | sfimage=eye.fill bash=$0 param1=--set param2=BAR_DISPLAY param3=show terminal=false refresh=true"
+        echo "--✓ Hide (tiny dot remains, clickable) | sfimage=eye.slash sfcolor=systemBlue bash=$0 param1=--set param2=BAR_DISPLAY param3=hide terminal=false refresh=true"
+    fi
 }
 
 emit_policy_menu() {
@@ -219,7 +238,12 @@ bar_pair=$(icon_for "$ICON_STYLE" "$bar_state")
 bar_icon=${bar_pair%%|*}
 bar_color=${bar_pair##*|}
 
-echo "${present}/${DEVICE_COUNT} | sfimage=$bar_icon sfcolor=$bar_color"
+if [ "$BAR_DISPLAY" = "hide" ]; then
+    # Tiny dim dot — keeps the dropdown reachable so the user can re-enable.
+    echo "· | size=11 color=#8e8e93"
+else
+    echo "${present}/${DEVICE_COUNT} | sfimage=$bar_icon sfcolor=$bar_color"
+fi
 echo "---"
 
 # Daemon state line (uses its own state-specific icons, independent of style).
@@ -320,6 +344,7 @@ echo "---"
 # rolled to its next cycle yet.
 POLICY_EFFECTIVE=$(read_setting PRESENCE_POLICY "$POLICY")
 emit_policy_menu "$POLICY_EFFECTIVE"
+emit_bar_visibility_menu "$BAR_DISPLAY"
 emit_icon_style_menu
 
 echo "---"
