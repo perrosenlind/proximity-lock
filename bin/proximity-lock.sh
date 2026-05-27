@@ -6,24 +6,16 @@
 # not see modern iPhones/Watches reliably), we read macOS's already-maintained
 # BLE state via `system_profiler SPBluetoothDataType -json`. The macOS Bluetooth
 # daemon keeps a live RSSI for paired Apple devices because Continuity needs it;
-# we just consume that snapshot. Heavy lifting lives in bin/proximity-presence.py.
-#
-# Writes a status snapshot to:
-#   ~/Library/Application Support/proximity-lock/status.env
-# which the optional SwiftBar/xbar plugin (plugins/proximity-lock.10s.sh) reads.
+# we just consume that snapshot.
 set -u
 
 # --- Config ---
-# Fill in the BT addresses of your trusted devices, lowercase with colons,
-# as printed by `system_profiler SPBluetoothDataType | grep Address:` or
-# by `blueutil --paired` (use hyphens or colons — both accepted).
 TRUSTED_MACS=(
     "aa:aa:aa:aa:aa:aa"   # e.g. iPhone
     "bb:bb:bb:bb:bb:bb"   # e.g. Apple Watch
 )
 
 # "all_absent" = lock only when NONE of the trusted devices are detected
-#                (recommended: avoids locking when you put one on a charger)
 # "any_absent" = lock as soon as ANY trusted device is missing
 PRESENCE_POLICY="all_absent"
 
@@ -36,6 +28,9 @@ RESPECT_MEDIA_ASSERTION=1 # 1 = skip lock while something prevents display sleep
 LOG="$HOME/Library/Logs/proximity-lock.log"
 STATUS_DIR="$HOME/Library/Application Support/proximity-lock"
 STATUS_FILE="$STATUS_DIR/status.env"
+# Plugin-driven runtime overrides (KEY=VALUE per line). Re-read every cycle
+# so menu-bar changes take effect without restarting the daemon.
+OVERRIDES_FILE="$STATUS_DIR/plugin.env"
 # --------------
 
 PMSET="/usr/bin/pmset"
@@ -64,6 +59,30 @@ hid_idle_seconds() {
 media_assertion_active() {
     [ "$RESPECT_MEDIA_ASSERTION" -eq 1 ] || return 1
     "$PMSET" -g assertions | grep -Eq '^[[:space:]]+PreventUserIdleDisplaySleep[[:space:]]+1'
+}
+
+# Read a value from the plugin overrides file. Returns the default if unset
+# or file missing. Whitelisted in apply_overrides to avoid drive-by edits.
+override_get() {
+    local key="$1" default="$2"
+    if [ -f "$OVERRIDES_FILE" ]; then
+        local v
+        v=$(grep -E "^${key}=" "$OVERRIDES_FILE" | tail -1 | cut -d= -f2-)
+        [ -n "$v" ] && { printf '%s' "$v"; return; }
+    fi
+    printf '%s' "$default"
+}
+
+# Pull live overrides from plugin.env on every cycle, with whitelisting and
+# basic validation. Anything not whitelisted is ignored.
+apply_overrides() {
+    local v
+    v=$(override_get PRESENCE_POLICY "")
+    case "$v" in
+        all_absent|any_absent) PRESENCE_POLICY="$v" ;;
+        "") : ;;
+        *) log "ignoring invalid PRESENCE_POLICY override: $v" ;;
+    esac
 }
 
 # Wraps the python helper. One TSV line per device with a live RSSI:
@@ -164,6 +183,7 @@ locked=0
 log "proximity-lock started (policy=$PRESENCE_POLICY, devices=${#TRUSTED_MACS[@]}, poll=${POLL_INTERVAL}s, min_rssi=${MIN_RSSI}, idle_gate=${IDLE_THRESHOLD}s)"
 
 while true; do
+    apply_overrides
     scan_and_update_state
     idle="$(hid_idle_seconds)"; idle="${idle:-0}"
 
