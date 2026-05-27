@@ -2,20 +2,24 @@
 # proximity-lock.sh — lock the macOS screen when trusted Bluetooth devices
 #                     leave range AND the user has been idle for a moment.
 #
-# Requires: brew install blueutil
+# Reliability story: instead of running our own classic-BT inquiry (which does
+# not see modern iPhones/Watches reliably), we read macOS's already-maintained
+# BLE state via `system_profiler SPBluetoothDataType -json`. The macOS Bluetooth
+# daemon keeps a live RSSI for paired Apple devices because Continuity needs it;
+# we just consume that snapshot. Heavy lifting lives in bin/proximity-presence.py.
 #
 # Writes a status snapshot to:
 #   ~/Library/Application Support/proximity-lock/status.env
-# which the optional SwiftBar/xbar plugin (plugins/proximity-lock.10s.sh)
-# reads to render menu bar status and per-device stats.
+# which the optional SwiftBar/xbar plugin (plugins/proximity-lock.10s.sh) reads.
 set -u
 
 # --- Config ---
-# Fill in the BT addresses of your trusted devices (lowercase, hyphen-separated,
-# as printed by `blueutil --paired`). Add or remove entries freely.
+# Fill in the BT addresses of your trusted devices, lowercase with colons,
+# as printed by `system_profiler SPBluetoothDataType | grep Address:` or
+# by `blueutil --paired` (use hyphens or colons — both accepted).
 TRUSTED_MACS=(
-    "aa-aa-aa-aa-aa-aa"   # e.g. iPhone
-    "bb-bb-bb-bb-bb-bb"   # e.g. Apple Watch
+    "aa:aa:aa:aa:aa:aa"   # e.g. iPhone
+    "bb:bb:bb:bb:bb:bb"   # e.g. Apple Watch
 )
 
 # "all_absent" = lock only when NONE of the trusted devices are detected
@@ -23,10 +27,10 @@ TRUSTED_MACS=(
 # "any_absent" = lock as soon as ANY trusted device is missing
 PRESENCE_POLICY="all_absent"
 
-POLL_INTERVAL=30          # seconds between scan cycles (inquiry itself takes a few s)
-INQUIRY_DURATION=4        # active-scan length in seconds (blueutil --inquiry N)
-MISS_THRESHOLD=2          # consecutive failing scans before locking
+POLL_INTERVAL=10          # seconds between snapshots (system_profiler is fast)
+MISS_THRESHOLD=3          # consecutive failing snapshots before considering "away"
 IDLE_THRESHOLD=30         # require >= this many seconds of HID idle before locking
+MIN_RSSI=-85              # RSSI weaker than this is treated as absent (-85 ≈ next room)
 RESPECT_MEDIA_ASSERTION=1 # 1 = skip lock while something prevents display sleep
 
 LOG="$HOME/Library/Logs/proximity-lock.log"
@@ -34,19 +38,19 @@ STATUS_DIR="$HOME/Library/Application Support/proximity-lock"
 STATUS_FILE="$STATUS_DIR/status.env"
 # --------------
 
-BLUEUTIL="$(command -v blueutil)"
 PMSET="/usr/bin/pmset"
 OSASCRIPT="/usr/bin/osascript"
 IOREG="/usr/sbin/ioreg"
+PRESENCE_HELPER="${PRESENCE_HELPER:-$HOME/bin/proximity-presence.py}"
 
 mkdir -p "$STATUS_DIR" "$(dirname "$LOG")"
 
 log() { echo "$(date '+%Y-%m-%d %H:%M:%S')  $1" >> "$LOG"; }
 
-if [ -z "$BLUEUTIL" ]; then
-    log "FATAL: blueutil not found in PATH — install with: brew install blueutil"
-    exit 1
-fi
+for bin in "$OSASCRIPT" "$IOREG" "$PMSET"; do
+    [ -x "$bin" ] || { log "FATAL: $bin not found or not executable"; exit 1; }
+done
+[ -x "$PRESENCE_HELPER" ] || { log "FATAL: $PRESENCE_HELPER not found or not executable"; exit 1; }
 
 lock_screen() {
     "$OSASCRIPT" -e 'tell application "System Events" to keystroke "q" using {control down, command down}'
@@ -62,48 +66,55 @@ media_assertion_active() {
     "$PMSET" -g assertions | grep -Eq '^[[:space:]]+PreventUserIdleDisplaySleep[[:space:]]+1'
 }
 
-# Look up a device's friendly name from `blueutil --paired`.
-device_name() {
-    local mac="$1" name
-    name="$("$BLUEUTIL" --paired 2>/dev/null \
-            | grep -i "address: $mac" \
-            | sed -n 's/.*name: "\([^"]*\)".*/\1/p' \
-            | head -1)"
-    printf '%s' "$name" | tr -d '\r\n' | tr '"=`$\\' '_____'
+# Wraps the python helper. One TSV line per device with a live RSSI:
+#   "<mac>\t<rssi>\t<name>"
+snapshot() {
+    "$PRESENCE_HELPER" "${TRUSTED_MACS[@]}" 2>/dev/null
 }
 
-# Pre-compute device names (rarely change).
-TRUSTED_NAMES=()
-for mac in "${TRUSTED_MACS[@]}"; do
-    n="$(device_name "$mac")"
-    TRUSTED_NAMES+=("${n:-unknown}")
-done
-
 # Per-cycle scan state, parallel to TRUSTED_MACS.
+TRUSTED_NAMES=()
 DEVICE_PRESENT=()
 DEVICE_RSSI=()
 DEVICE_LAST_SEEN=()
 for _ in "${TRUSTED_MACS[@]}"; do
+    TRUSTED_NAMES+=("unknown")
     DEVICE_PRESENT+=(0)
     DEVICE_RSSI+=("")
     DEVICE_LAST_SEEN+=(0)
 done
 
+normalize_mac() {
+    printf '%s' "$1" | tr '[:upper:]' '[:lower:]' | tr '-' ':'
+}
+
 scan_and_update_state() {
-    local scan i mac rssi line
-    scan="$("$BLUEUTIL" --inquiry "$INQUIRY_DURATION" 2>/dev/null \
-            | tr '[:upper:]' '[:lower:]')"
+    local snap addr rssi name i mac matched
+    snap="$(snapshot)"
 
     for i in "${!TRUSTED_MACS[@]}"; do
-        mac="$(printf '%s' "${TRUSTED_MACS[$i]}" | tr '[:upper:]' '[:lower:]')"
-        line="$(printf '%s\n' "$scan" | grep -F "$mac" | head -1)"
-        if [ -n "$line" ]; then
-            DEVICE_PRESENT[$i]=1
-            DEVICE_LAST_SEEN[$i]=$(date +%s)
-            rssi="$(printf '%s' "$line" | grep -oE 'rssi: *-?[0-9]+' | head -1 | awk '{print $NF}')"
-            DEVICE_RSSI[$i]="${rssi:-}"
-        else
+        mac="$(normalize_mac "${TRUSTED_MACS[$i]}")"
+        matched=0
+        while IFS=$'\t' read -r addr rssi name; do
+            [ -z "$addr" ] && continue
+            if [ "$addr" = "$mac" ]; then
+                name="$(printf '%s' "$name" | tr -d '\r\n' | tr '"=`$\\' '_____')"
+                [ -n "$name" ] && TRUSTED_NAMES[$i]="$name"
+                if [ "$rssi" -ge "$MIN_RSSI" ] 2>/dev/null; then
+                    DEVICE_PRESENT[$i]=1
+                    DEVICE_RSSI[$i]="$rssi"
+                    DEVICE_LAST_SEEN[$i]=$(date +%s)
+                else
+                    DEVICE_PRESENT[$i]=0
+                    DEVICE_RSSI[$i]="$rssi"
+                fi
+                matched=1
+                break
+            fi
+        done <<< "$snap"
+        if [ "$matched" -eq 0 ]; then
             DEVICE_PRESENT[$i]=0
+            DEVICE_RSSI[$i]=""
         fi
     done
 }
@@ -131,6 +142,7 @@ write_status() {
         echo "POLL_INTERVAL=$POLL_INTERVAL"
         echo "MISS_THRESHOLD=$MISS_THRESHOLD"
         echo "IDLE_THRESHOLD=$IDLE_THRESHOLD"
+        echo "MIN_RSSI=$MIN_RSSI"
         echo "MISSES=$misses_now"
         echo "IDLE_SECONDS=$idle"
         echo "LOCKED=$locked_state"
@@ -148,7 +160,7 @@ write_status() {
 misses=0
 locked=0
 
-log "proximity-lock started (policy=$PRESENCE_POLICY, devices=${#TRUSTED_MACS[@]}, poll=${POLL_INTERVAL}s, idle_gate=${IDLE_THRESHOLD}s)"
+log "proximity-lock started (policy=$PRESENCE_POLICY, devices=${#TRUSTED_MACS[@]}, poll=${POLL_INTERVAL}s, min_rssi=${MIN_RSSI}, idle_gate=${IDLE_THRESHOLD}s)"
 
 while true; do
     scan_and_update_state

@@ -18,29 +18,35 @@ Works around two common annoyances with naive proximity-lock scripts:
 ## Requirements
 
 - macOS (tested on Apple Silicon, current macOS)
-- [`blueutil`](https://github.com/toy/blueutil): `brew install blueutil`
+- `python3` — included with Xcode Command Line Tools (`xcode-select --install`)
+  or any system Python 3.
+
+No `blueutil` or other Bluetooth library is needed at runtime. The script
+relies on macOS's own Bluetooth daemon, which already does continuous BLE
+scanning for paired Apple devices to power Continuity. We read its live RSSI
+snapshot via `system_profiler SPBluetoothDataType -json`.
 
 ## Install
 
-1. Find your trusted devices' Bluetooth addresses:
+1. Find your trusted devices' Bluetooth addresses. Easiest:
 
    ```bash
-   blueutil --paired
+   system_profiler SPBluetoothDataType | grep -E '^(  +)(\S.*:|Address:|RSSI:)' | head -40
    ```
 
-   Copy the `address:` field (format `aa-aa-aa-aa-aa-aa`) for each device
-   you want to treat as "you".
+   Look for entries that have an `RSSI` line — those are the devices macOS is
+   actively tracking. Note their `Address:` values (format `AA:BB:CC:DD:EE:FF`).
 
-2. Drop the script into `~/bin` and make it executable:
+2. Drop the daemon and the presence helper into `~/bin`:
 
    ```bash
    mkdir -p ~/bin
-   cp bin/proximity-lock.sh ~/bin/
-   chmod +x ~/bin/proximity-lock.sh
+   cp bin/proximity-lock.sh bin/proximity-presence.py ~/bin/
+   chmod +x ~/bin/proximity-lock.sh ~/bin/proximity-presence.py
    ```
 
 3. Edit `~/bin/proximity-lock.sh` and replace the `TRUSTED_MACS` entries
-   with your own addresses.
+   with your own addresses (colons or hyphens, lowercase, both accepted).
 
 4. Test it in the foreground:
 
@@ -68,30 +74,35 @@ Edit the `--- Config ---` block at the top of `proximity-lock.sh`:
 
 | Variable | Default | What it does |
 |----------|---------|--------------|
-| `TRUSTED_MACS` | `(aa-aa-…  bb-bb-…)` | List of BT addresses considered "you". |
+| `TRUSTED_MACS` | `(aa:aa:…  bb:bb:…)` | List of BT addresses considered "you". |
 | `PRESENCE_POLICY` | `all_absent` | `all_absent` locks only when no trusted device is detected. `any_absent` locks if any one is missing. |
-| `POLL_INTERVAL` | `30` | Seconds between scans. |
-| `INQUIRY_DURATION` | `4` | Active-scan length in seconds passed to `blueutil --inquiry`. |
-| `MISS_THRESHOLD` | `2` | Consecutive failed scans before considering you "away". |
+| `POLL_INTERVAL` | `10` | Seconds between presence snapshots (snapshots are cheap). |
+| `MISS_THRESHOLD` | `3` | Consecutive failing snapshots before considering you "away". |
 | `IDLE_THRESHOLD` | `30` | Lock only if there's been at least this many seconds of no keyboard/trackpad input. |
+| `MIN_RSSI` | `-85` | RSSI weaker than this is treated as absent. `-85` ≈ next room; raise toward `-60` for "same desk only". |
 | `RESPECT_MEDIA_ASSERTION` | `1` | If `1`, skip locking while another app holds a `PreventUserIdleDisplaySleep` assertion. |
 
 Grace period before a lock attempt = `POLL_INTERVAL × MISS_THRESHOLD`. With
-defaults that's about a minute of absence + 30 s of inactivity before the
-screen locks.
+defaults that's about 30 s of absence + 30 s of inactivity before the screen
+locks.
 
 ## How it works
 
-- Polls Bluetooth via `blueutil --inquiry`. This is an *active scan* that works
-  even for devices (like iPhones) that don't keep a persistent connection to
-  the Mac.
-- When all (or any) trusted devices are missing, checks
-  `ioreg -c IOHIDSystem` for `HIDIdleTime` and only proceeds if the user has
-  truly stepped away.
-- Locks via the documented user-facing shortcut (Cmd+Ctrl+Q) using
+- **Presence**: `bin/proximity-presence.py` runs `system_profiler
+  SPBluetoothDataType -json` and reports current RSSI for the MACs you care
+  about. macOS's Bluetooth daemon maintains this list in real time for Apple
+  devices (iPhone, Apple Watch, AirPods), so we get reliable RSSI without
+  doing our own BLE scanning or holding a connection.
+- **Idle gate**: when all (or any) trusted devices are missing, the daemon
+  checks `ioreg -c IOHIDSystem` for `HIDIdleTime` and only proceeds if the
+  user has truly stepped away from the keyboard.
+- **Media gate**: skips locking when another app holds a
+  `PreventUserIdleDisplaySleep` assertion (calls, presentations, fullscreen
+  video).
+- **Lock**: invokes the documented user-facing shortcut (Cmd+Ctrl+Q) via
   `osascript`. No private framework calls.
-- Logs every interesting event to `~/Library/Logs/proximity-lock.log`.
-- After each scan cycle, writes a status snapshot to
+- **Logging & status**: events go to `~/Library/Logs/proximity-lock.log`,
+  and a per-cycle snapshot goes to
   `~/Library/Application Support/proximity-lock/status.env` (used by the
   optional menu bar plugin, below).
 
@@ -135,7 +146,7 @@ LaunchAgent.
 ```bash
 launchctl unload ~/Library/LaunchAgents/com.example.proximitylock.plist
 rm ~/Library/LaunchAgents/com.example.proximitylock.plist
-rm ~/bin/proximity-lock.sh
+rm ~/bin/proximity-lock.sh ~/bin/proximity-presence.py
 rm ~/Library/Logs/proximity-lock.log
 rm -rf "$HOME/Library/Application Support/proximity-lock"
 # If you installed the menu bar plugin:
