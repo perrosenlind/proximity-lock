@@ -7,9 +7,10 @@
 #      numbered list so you can pick which ones to treat as "you".
 #   3. Copies bin/proximity-lock.sh and bin/proximity-presence.py to ~/bin,
 #      replacing the TRUSTED_MACS array with your picks.
-#   4. Installs and loads the LaunchAgent.
+#   4. Installs and loads the LaunchAgent (auto-runs at every reboot).
 #   5. Installs SwiftBar if missing (brew --cask), drops the plugin into
-#      ~/SwiftBar/Plugins, sets the prefs, and launches it.
+#      ~/SwiftBar/Plugins, adds SwiftBar to macOS Login Items so the menu
+#      bar UI also auto-starts after reboot, and launches it.
 #   6. Prints a final checklist (lock-screen setting, log location).
 #
 # Safe to re-run. If an existing install is detected, you'll be asked first.
@@ -33,14 +34,14 @@ SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
 SRC_DAEMON="$SCRIPT_DIR/bin/proximity-lock.sh"
 SRC_HELPER="$SCRIPT_DIR/bin/proximity-presence.py"
 SRC_PLIST="$SCRIPT_DIR/LaunchAgents/com.example.proximitylock.plist"
-SRC_PLUGIN="$SCRIPT_DIR/plugins/proximity-lock.10s.sh"
+SRC_PLUGIN="$SCRIPT_DIR/plugins/proximity-lock.5s.sh"
 
 DEST_BIN="$HOME/bin"
 DEST_DAEMON="$DEST_BIN/proximity-lock.sh"
 DEST_HELPER="$DEST_BIN/proximity-presence.py"
 DEST_PLIST="$HOME/Library/LaunchAgents/com.example.proximitylock.plist"
 DEST_PLUGIN_DIR="$HOME/SwiftBar/Plugins"
-DEST_PLUGIN="$DEST_PLUGIN_DIR/proximity-lock.10s.sh"
+DEST_PLUGIN="$DEST_PLUGIN_DIR/proximity-lock.5s.sh"
 
 # ---------------------------------------------------------------- preflight
 step "Preflight checks"
@@ -238,12 +239,24 @@ if [ -d "$SWIFTBAR_APP" ]; then
     ln -sf "$SRC_PLUGIN" "$DEST_PLUGIN"
     defaults write com.ameba.SwiftBar PluginDirectory -string "$DEST_PLUGIN_DIR"
     ok "Plugin symlinked: $DEST_PLUGIN"
+
+    # Add SwiftBar to macOS Login Items so the menu bar UI comes back after
+    # reboots. The osascript first checks for an existing entry to avoid
+    # duplicates.
+    if /usr/bin/osascript -e 'tell application "System Events" to get the name of every login item' 2>/dev/null | grep -qi SwiftBar; then
+        ok "SwiftBar already in Login Items"
+    elif /usr/bin/osascript -e 'tell application "System Events" to make login item at end with properties {path:"/Applications/SwiftBar.app", hidden:true}' >/dev/null 2>&1; then
+        ok "Added SwiftBar to Login Items (auto-starts after reboot)"
+    else
+        warn "Could not add SwiftBar to Login Items — add it manually in System Settings → General → Login Items"
+    fi
+
     if ! pgrep -fq /Applications/SwiftBar.app/Contents/MacOS/SwiftBar; then
         open -a SwiftBar
         ok "Launched SwiftBar"
         hint "If SwiftBar prompts to grant access to the plugin folder, accept it."
     else
-        ok "SwiftBar already running — it will pick up the new plugin within 10s"
+        ok "SwiftBar already running — it will pick up the new plugin within 5s"
     fi
 fi
 

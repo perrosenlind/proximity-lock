@@ -21,7 +21,7 @@ DAEMON="$HOME/bin/proximity-lock.sh"
 HELPER="$HOME/bin/proximity-presence.py"
 LOG="$HOME/Library/Logs/proximity-lock.log"
 STATUS_DIR="$HOME/Library/Application Support/proximity-lock"
-PLUGIN="$HOME/SwiftBar/Plugins/proximity-lock.10s.sh"
+PLUGIN="$HOME/SwiftBar/Plugins/proximity-lock.5s.sh"
 
 # Unload and remove every proximity-lock LaunchAgent regardless of label.
 step "Stopping daemon"

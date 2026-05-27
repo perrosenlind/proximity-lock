@@ -42,10 +42,12 @@ The installer will:
    trust as "you".
 3. Copy `proximity-lock.sh` and `proximity-presence.py` to `~/bin/`, with
    your picks baked into the `TRUSTED_MACS` config.
-4. Install and load the LaunchAgent so the daemon runs at login.
+4. Install and load the LaunchAgent so the daemon runs at login and after
+   every reboot (RunAtLoad + KeepAlive, loaded with `launchctl load -w`).
 5. Install [SwiftBar](https://github.com/swiftbar/SwiftBar) via Homebrew if
-   it's missing, drop the menu bar plugin into `~/SwiftBar/Plugins`, and
-   launch it.
+   it's missing, drop the menu bar plugin into `~/SwiftBar/Plugins`, add
+   SwiftBar to your macOS Login Items so the menu bar UI also comes back
+   after a reboot, and launch it.
 
 Re-running is safe — it'll detect any existing install (including under a
 different LaunchAgent label) and prompt before replacing it.
@@ -85,15 +87,16 @@ Edit the `--- Config ---` block at the top of `proximity-lock.sh`:
 |----------|---------|--------------|
 | `TRUSTED_MACS` | `(aa:aa:…  bb:bb:…)` | List of BT addresses considered "you". |
 | `PRESENCE_POLICY` | `all_absent` | `all_absent` locks only when no trusted device is detected. `any_absent` locks if any one is missing. |
-| `POLL_INTERVAL` | `10` | Seconds between presence snapshots (snapshots are cheap). |
-| `MISS_THRESHOLD` | `3` | Consecutive failing snapshots before considering you "away". |
-| `IDLE_THRESHOLD` | `30` | Lock only if there's been at least this many seconds of no keyboard/trackpad input. |
+| `POLL_INTERVAL` | `5` | Seconds between presence snapshots (snapshots are cheap). |
+| `MISS_THRESHOLD` | `2` | Consecutive failing snapshots before considering you "away". |
+| `IDLE_THRESHOLD` | `10` | Lock only if there's been at least this many seconds of no keyboard/trackpad input. |
 | `MIN_RSSI` | `-85` | RSSI weaker than this is treated as absent. `-85` ≈ next room; raise toward `-60` for "same desk only". |
 | `RESPECT_MEDIA_ASSERTION` | `1` | If `1`, skip locking while another app holds a `PreventUserIdleDisplaySleep` assertion. |
 
 Grace period before a lock attempt = `POLL_INTERVAL × MISS_THRESHOLD`. With
-defaults that's about 30 s of absence + 30 s of inactivity before the screen
-locks.
+defaults that's about 10 s of absence + 10 s of inactivity before the screen
+locks (≈ 20 s worst case). Bump the numbers up if you want a longer grace
+window; lower them for even faster locking.
 
 ## How it works
 
@@ -118,7 +121,7 @@ locks.
 ## Menu bar plugin (optional)
 
 A [SwiftBar](https://github.com/swiftbar/SwiftBar) /
-[xbar](https://xbarapp.com/) plugin lives in `plugins/proximity-lock.10s.sh`.
+[xbar](https://xbarapp.com/) plugin lives in `plugins/proximity-lock.5s.sh`.
 The installer drops it in `~/SwiftBar/Plugins/` automatically. It reads the
 status file written by the daemon and renders:
 
@@ -131,7 +134,7 @@ status file written by the daemon and renders:
   state icon.
 - Quick actions — open or tail the log, edit config, restart the LaunchAgent.
 
-The `.10s.sh` filename suffix tells SwiftBar to refresh every 10 seconds.
+The `.5s.sh` filename suffix tells SwiftBar to refresh every 5 seconds.
 xbar uses the same plugin format if you prefer it over SwiftBar.
 
 If the daemon isn't running, the plugin shows a "daemon not running" state
@@ -144,10 +147,10 @@ bar item entirely use the CLI:
 
 ```bash
 # Hide — no menu bar item, no click target.
-~/SwiftBar/Plugins/proximity-lock.10s.sh --hide
+~/SwiftBar/Plugins/proximity-lock.5s.sh --hide
 
 # Bring it back.
-~/SwiftBar/Plugins/proximity-lock.10s.sh --show
+~/SwiftBar/Plugins/proximity-lock.5s.sh --show
 ```
 
 The daemon keeps running either way — only the icon goes away. The
