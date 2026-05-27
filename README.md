@@ -91,6 +91,44 @@ screen locks.
 - Locks via the documented user-facing shortcut (Cmd+Ctrl+Q) using
   `osascript`. No private framework calls.
 - Logs every interesting event to `~/Library/Logs/proximity-lock.log`.
+- After each scan cycle, writes a status snapshot to
+  `~/Library/Application Support/proximity-lock/status.env` (used by the
+  optional menu bar plugin, below).
+
+## Menu bar plugin (optional)
+
+A [SwiftBar](https://github.com/swiftbar/SwiftBar) / [xbar](https://xbarapp.com/)
+plugin lives in `plugins/proximity-lock.10s.sh`. It reads the status file
+written by the daemon and renders:
+
+- A menu bar icon — 🟢 / 🟡 / 🔴 with `present/total` count.
+- Per-device rows showing presence, signal-strength bars, RSSI dBm, and
+  last-seen time. Submenu lets you copy the MAC.
+- Daemon state — current policy, idle seconds, miss count, locked-or-watching.
+- Quick actions — open or tail the log, edit config, restart the LaunchAgent.
+
+### Install (SwiftBar)
+
+```bash
+brew install --cask swiftbar
+# Launch SwiftBar once, point its plugin folder somewhere (e.g. ~/.swiftbar),
+# then drop the plugin in:
+mkdir -p ~/.swiftbar
+cp plugins/proximity-lock.10s.sh ~/.swiftbar/
+chmod +x ~/.swiftbar/proximity-lock.10s.sh
+```
+
+The `.10s.sh` filename suffix tells SwiftBar to refresh every 10 seconds.
+Adjust if you want a different cadence.
+
+xbar uses the same plugin format — copy the file into its plugins folder
+instead.
+
+### What it shows when the daemon isn't running
+
+If `~/Library/Application Support/proximity-lock/status.env` is missing, the
+plugin shows a "daemon not running" state with a one-click action to load the
+LaunchAgent.
 
 ## Uninstall
 
@@ -99,6 +137,9 @@ launchctl unload ~/Library/LaunchAgents/com.example.proximitylock.plist
 rm ~/Library/LaunchAgents/com.example.proximitylock.plist
 rm ~/bin/proximity-lock.sh
 rm ~/Library/Logs/proximity-lock.log
+rm -rf "$HOME/Library/Application Support/proximity-lock"
+# If you installed the menu bar plugin:
+rm -f ~/.swiftbar/proximity-lock.10s.sh
 ```
 
 ## License
