@@ -28,45 +28,54 @@ snapshot via `system_profiler SPBluetoothDataType -json`.
 
 ## Install
 
-1. Find your trusted devices' Bluetooth addresses. Easiest:
+```bash
+git clone https://github.com/perrosenlind/proximity-lock.git
+cd proximity-lock
+./install.sh
+```
 
-   ```bash
-   system_profiler SPBluetoothDataType | grep -E '^(  +)(\S.*:|Address:|RSSI:)' | head -40
-   ```
+The installer will:
 
-   Look for entries that have an `RSSI` line — those are the devices macOS is
-   actively tracking. Note their `Address:` values (format `AA:BB:CC:DD:EE:FF`).
+1. Check macOS, `/usr/bin/python3`, and Homebrew.
+2. Show you a numbered list of paired Bluetooth devices (devices currently
+   in range are listed first — those are your candidates) and ask which to
+   trust as "you".
+3. Copy `proximity-lock.sh` and `proximity-presence.py` to `~/bin/`, with
+   your picks baked into the `TRUSTED_MACS` config.
+4. Install and load the LaunchAgent so the daemon runs at login.
+5. Install [SwiftBar](https://github.com/swiftbar/SwiftBar) via Homebrew if
+   it's missing, drop the menu bar plugin into `~/SwiftBar/Plugins`, and
+   launch it.
 
-2. Drop the daemon and the presence helper into `~/bin`:
+Re-running is safe — it'll detect any existing install (including under a
+different LaunchAgent label) and prompt before replacing it.
 
-   ```bash
-   mkdir -p ~/bin
-   cp bin/proximity-lock.sh bin/proximity-presence.py ~/bin/
-   chmod +x ~/bin/proximity-lock.sh ~/bin/proximity-presence.py
-   ```
+After install, set **System Settings → Lock Screen → Require password →
+Immediately** so the lock screen actually requires authentication.
 
-3. Edit `~/bin/proximity-lock.sh` and replace the `TRUSTED_MACS` entries
-   with your own addresses (colons or hyphens, lowercase, both accepted).
+To remove everything:
 
-4. Test it in the foreground:
+```bash
+./uninstall.sh
+```
 
-   ```bash
-   ~/bin/proximity-lock.sh &
-   tail -f ~/Library/Logs/proximity-lock.log
-   # Walk away with your phone/watch. Confirm a lock event in the log.
-   # kill %1 to stop.
-   ```
+(SwiftBar itself is left in place — run `brew uninstall --cask swiftbar` if
+you also want it gone.)
 
-5. Install the LaunchAgent so it runs at login and stays alive:
+### Manual install
 
-   ```bash
-   cp LaunchAgents/com.example.proximitylock.plist ~/Library/LaunchAgents/
-   launchctl load -w ~/Library/LaunchAgents/com.example.proximitylock.plist
-   launchctl list | grep proximitylock
-   ```
+If you'd rather not run the installer:
 
-   Also set **System Settings → Lock Screen → Require password → Immediately**
-   so the lock actually requires authentication.
+```bash
+mkdir -p ~/bin
+cp bin/proximity-lock.sh bin/proximity-presence.py ~/bin/
+chmod +x ~/bin/proximity-lock.sh ~/bin/proximity-presence.py
+# Edit ~/bin/proximity-lock.sh and fill in TRUSTED_MACS with your addresses
+# (find them with: system_profiler SPBluetoothDataType | grep -E 'Address:|RSSI:')
+
+cp LaunchAgents/com.example.proximitylock.plist ~/Library/LaunchAgents/
+launchctl load -w ~/Library/LaunchAgents/com.example.proximitylock.plist
+```
 
 ## Configuration
 
@@ -108,50 +117,25 @@ locks.
 
 ## Menu bar plugin (optional)
 
-A [SwiftBar](https://github.com/swiftbar/SwiftBar) / [xbar](https://xbarapp.com/)
-plugin lives in `plugins/proximity-lock.10s.sh`. It reads the status file
-written by the daemon and renders:
+A [SwiftBar](https://github.com/swiftbar/SwiftBar) /
+[xbar](https://xbarapp.com/) plugin lives in `plugins/proximity-lock.10s.sh`.
+The installer drops it in `~/SwiftBar/Plugins/` automatically. It reads the
+status file written by the daemon and renders:
 
-- A menu bar icon — 🟢 / 🟡 / 🔴 with `present/total` count.
-- Per-device rows showing presence, signal-strength bars, RSSI dBm, and
-  last-seen time. Submenu lets you copy the MAC.
-- Daemon state — current policy, idle seconds, miss count, locked-or-watching.
+- A menu bar icon — SF Symbol `dot.radiowaves.left.and.right` with adaptive
+  color (green / orange / red) and `present/total` count.
+- Per-device rows with device-type SF Symbol (iphone, applewatch, airpods…),
+  signal-strength label (Excellent → Very weak), RSSI in dBm, and copy-MAC
+  submenu.
+- Daemon state — Watching / Missed scans / Armed / Locked, each with its own
+  state icon.
 - Quick actions — open or tail the log, edit config, restart the LaunchAgent.
 
-### Install (SwiftBar)
-
-```bash
-brew install --cask swiftbar
-# Launch SwiftBar once, point its plugin folder somewhere (e.g. ~/.swiftbar),
-# then drop the plugin in:
-mkdir -p ~/.swiftbar
-cp plugins/proximity-lock.10s.sh ~/.swiftbar/
-chmod +x ~/.swiftbar/proximity-lock.10s.sh
-```
-
 The `.10s.sh` filename suffix tells SwiftBar to refresh every 10 seconds.
-Adjust if you want a different cadence.
+xbar uses the same plugin format if you prefer it over SwiftBar.
 
-xbar uses the same plugin format — copy the file into its plugins folder
-instead.
-
-### What it shows when the daemon isn't running
-
-If `~/Library/Application Support/proximity-lock/status.env` is missing, the
-plugin shows a "daemon not running" state with a one-click action to load the
-LaunchAgent.
-
-## Uninstall
-
-```bash
-launchctl unload ~/Library/LaunchAgents/com.example.proximitylock.plist
-rm ~/Library/LaunchAgents/com.example.proximitylock.plist
-rm ~/bin/proximity-lock.sh ~/bin/proximity-presence.py
-rm ~/Library/Logs/proximity-lock.log
-rm -rf "$HOME/Library/Application Support/proximity-lock"
-# If you installed the menu bar plugin:
-rm -f ~/.swiftbar/proximity-lock.10s.sh
-```
+If the daemon isn't running, the plugin shows a "daemon not running" state
+with a one-click action to load the LaunchAgent.
 
 ## License
 
