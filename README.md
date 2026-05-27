@@ -137,6 +137,26 @@ xbar uses the same plugin format if you prefer it over SwiftBar.
 If the daemon isn't running, the plugin shows a "daemon not running" state
 with a one-click action to load the LaunchAgent.
 
+### Hiding the menu bar icon
+
+The icon-style submenu lets you change the symbol, but to remove the menu
+bar item entirely use the CLI:
+
+```bash
+# Hide — no menu bar item, no click target.
+~/SwiftBar/Plugins/proximity-lock.10s.sh --hide
+
+# Bring it back.
+~/SwiftBar/Plugins/proximity-lock.10s.sh --show
+```
+
+The daemon keeps running either way — only the icon goes away. The
+visibility setting is persisted in
+`~/Library/Application Support/proximity-lock/plugin.env`, so the choice
+survives reboots and SwiftBar restarts.
+
+Run the plugin with `--help` for the full CLI reference.
+
 ## License
 
 MIT

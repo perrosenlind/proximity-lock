@@ -46,12 +46,45 @@ write_setting() {
     fi
 }
 
-# CLI dispatch: clicking a settings menu item re-invokes this script with
-# `--set KEY VALUE`, which we handle here and exit before rendering.
-if [ "${1:-}" = "--set" ] && [ -n "${2:-}" ] && [ -n "${3:-}" ]; then
-    write_setting "$2" "$3"
-    exit 0
-fi
+# CLI dispatch. Run before rendering so menu-button callbacks and shell users
+# both work. Supported invocations:
+#
+#   plugin.sh                     — render output (this is what SwiftBar calls)
+#   plugin.sh --hide              — hide the menu bar icon entirely (no click target)
+#   plugin.sh --show              — re-enable the menu bar icon
+#   plugin.sh --set KEY VALUE     — set any plugin config key (used by menu items)
+#   plugin.sh --help              — print this usage
+#
+case "${1:-}" in
+    --hide) write_setting BAR_DISPLAY hide; exit 0 ;;
+    --show) write_setting BAR_DISPLAY show; exit 0 ;;
+    --set)
+        [ -n "${2:-}" ] && [ -n "${3:-}" ] || { echo "usage: $0 --set KEY VALUE" >&2; exit 2; }
+        write_setting "$2" "$3"
+        exit 0
+        ;;
+    --help|-h)
+        cat <<EOF
+proximity-lock SwiftBar plugin
+
+Hide the menu bar icon entirely (no click target, dropdown unreachable):
+    $0 --hide
+
+Bring it back:
+    $0 --show
+
+Set any plugin config key (used internally by menu items; rarely needed):
+    $0 --set KEY VALUE
+
+Config is persisted at:
+    ~/Library/Application Support/proximity-lock/plugin.env
+
+The plugin is normally invoked by SwiftBar with no args; running it
+directly prints the menu output to stdout.
+EOF
+        exit 0
+        ;;
+esac
 
 # ---------------------------------------------------------------- icon styles
 # Each style maps a state to "<sfimage>|<sfcolor>".
@@ -113,6 +146,13 @@ ICON_STYLES=(
 ICON_STYLE=$(read_setting ICON_STYLE radio)
 BAR_DISPLAY=$(read_setting BAR_DISPLAY show)
 
+# Hide entirely — emit nothing so there's no menu bar item and no click target.
+# Re-enable from any shell with:
+#     ~/bin/swiftbar-plugins/proximity-lock.10s.sh --set BAR_DISPLAY show
+if [ "$BAR_DISPLAY" = "hide" ]; then
+    exit 0
+fi
+
 # ---------------------------------------------------------------- render
 now=$(date +%s)
 MONO="font=Menlo size=11"
@@ -123,11 +163,7 @@ emit_missing() {
     local pair sym color
     pair=$(icon_for "$ICON_STYLE" stale)
     sym=${pair%%|*}; color=${pair##*|}
-    if [ "$BAR_DISPLAY" = "hide" ]; then
-        echo "· | size=11 color=#8e8e93"
-    else
-        echo "proximity | sfimage=$sym sfcolor=$color"
-    fi
+    echo "proximity | sfimage=$sym sfcolor=$color"
     echo "---"
     echo "Daemon not running"
     echo "Status file missing | $DIM"
@@ -140,8 +176,6 @@ emit_missing() {
     fi
     echo "Run in foreground | sfimage=terminal bash=$SCRIPT_USER terminal=true"
     echo "Edit config… | sfimage=square.and.pencil bash=/usr/bin/open param1=-t param2=$SCRIPT_USER terminal=false"
-    echo "---"
-    emit_bar_visibility_menu "$BAR_DISPLAY"
     emit_icon_style_menu
 }
 
@@ -159,18 +193,6 @@ emit_icon_style_menu() {
             echo "--   $label | sfimage=$sym sfcolor=$color bash=$0 param1=--set param2=ICON_STYLE param3=$id terminal=false refresh=true"
         fi
     done
-}
-
-emit_bar_visibility_menu() {
-    local current="$1"
-    echo "Menu bar | sfimage=menubar.dock.rectangle $HEADER"
-    if [ "$current" = "show" ]; then
-        echo "--✓ Show icon | sfimage=eye.fill sfcolor=systemBlue bash=$0 param1=--set param2=BAR_DISPLAY param3=show terminal=false refresh=true"
-        echo "--   Hide (tiny dot remains, clickable) | sfimage=eye.slash bash=$0 param1=--set param2=BAR_DISPLAY param3=hide terminal=false refresh=true"
-    else
-        echo "--   Show icon | sfimage=eye.fill bash=$0 param1=--set param2=BAR_DISPLAY param3=show terminal=false refresh=true"
-        echo "--✓ Hide (tiny dot remains, clickable) | sfimage=eye.slash sfcolor=systemBlue bash=$0 param1=--set param2=BAR_DISPLAY param3=hide terminal=false refresh=true"
-    fi
 }
 
 emit_policy_menu() {
@@ -238,12 +260,7 @@ bar_pair=$(icon_for "$ICON_STYLE" "$bar_state")
 bar_icon=${bar_pair%%|*}
 bar_color=${bar_pair##*|}
 
-if [ "$BAR_DISPLAY" = "hide" ]; then
-    # Tiny dim dot — keeps the dropdown reachable so the user can re-enable.
-    echo "· | size=11 color=#8e8e93"
-else
-    echo "${present}/${DEVICE_COUNT} | sfimage=$bar_icon sfcolor=$bar_color"
-fi
+echo "${present}/${DEVICE_COUNT} | sfimage=$bar_icon sfcolor=$bar_color"
 echo "---"
 
 # Daemon state line (uses its own state-specific icons, independent of style).
@@ -344,7 +361,6 @@ echo "---"
 # rolled to its next cycle yet.
 POLICY_EFFECTIVE=$(read_setting PRESENCE_POLICY "$POLICY")
 emit_policy_menu "$POLICY_EFFECTIVE"
-emit_bar_visibility_menu "$BAR_DISPLAY"
 emit_icon_style_menu
 
 echo "---"
