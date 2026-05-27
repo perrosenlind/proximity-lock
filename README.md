@@ -87,15 +87,15 @@ Edit the `--- Config ---` block at the top of `proximity-lock.sh`:
 |----------|---------|--------------|
 | `TRUSTED_MACS` | `(aa:aa:…  bb:bb:…)` | List of BT addresses considered "you". |
 | `PRESENCE_POLICY` | `all_absent` | `all_absent` locks only when no trusted device is detected. `any_absent` locks if any one is missing. |
-| `POLL_INTERVAL` | `5` | Seconds between presence snapshots (snapshots are cheap). |
+| `POLL_INTERVAL` | `3` | Seconds between presence snapshots (snapshots are cheap). |
 | `MISS_THRESHOLD` | `2` | Consecutive failing snapshots before considering you "away". |
-| `IDLE_THRESHOLD` | `10` | Lock only if there's been at least this many seconds of no keyboard/trackpad input. |
-| `MIN_RSSI` | `-85` | RSSI weaker than this is treated as absent. `-85` ≈ next room; raise toward `-60` for "same desk only". |
+| `IDLE_THRESHOLD` | `5` | Lock only if there's been at least this many seconds of no keyboard/trackpad input. |
+| `MIN_RSSI` | `-75` | RSSI weaker than this is treated as absent. `-75` ≈ same room only; raise toward `-85` (or `-90`) for "anywhere in the home". |
 | `RESPECT_MEDIA_ASSERTION` | `1` | If `1`, skip locking while another app holds a `PreventUserIdleDisplaySleep` assertion. |
 
 Grace period before a lock attempt = `POLL_INTERVAL × MISS_THRESHOLD`. With
-defaults that's about 10 s of absence + 10 s of inactivity before the screen
-locks (≈ 20 s worst case). Bump the numbers up if you want a longer grace
+defaults that's about 6 s of absence + 5 s of inactivity before the screen
+locks (≈ 11 s worst case). Bump the numbers up if you want a longer grace
 window; lower them for even faster locking.
 
 ## How it works

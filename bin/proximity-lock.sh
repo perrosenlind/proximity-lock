@@ -19,10 +19,11 @@ TRUSTED_MACS=(
 # "any_absent" = lock as soon as ANY trusted device is missing
 PRESENCE_POLICY="all_absent"
 
-POLL_INTERVAL=5           # seconds between snapshots (system_profiler is fast)
+POLL_INTERVAL=3           # seconds between snapshots (system_profiler is fast)
 MISS_THRESHOLD=2          # consecutive failing snapshots before considering "away"
-IDLE_THRESHOLD=10         # require >= this many seconds of HID idle before locking
-MIN_RSSI=-85              # RSSI weaker than this is treated as absent (-85 ≈ next room)
+IDLE_THRESHOLD=5          # require >= this many seconds of HID idle before locking
+MIN_RSSI=-75              # RSSI weaker than this is treated as absent
+                          # (-75 ≈ same room only; raise toward -85 if too aggressive)
 RESPECT_MEDIA_ASSERTION=1 # 1 = skip lock while something prevents display sleep
 
 LOG="$HOME/Library/Logs/proximity-lock.log"
