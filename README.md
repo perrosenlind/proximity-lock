@@ -90,7 +90,8 @@ Edit the `--- Config ---` block at the top of `proximity-lock.sh`:
 | `POLL_INTERVAL` | `3` | Seconds between presence snapshots (snapshots are cheap). |
 | `MISS_THRESHOLD` | `2` | Consecutive failing snapshots before considering you "away". |
 | `IDLE_THRESHOLD` | `5` | Lock only if there's been at least this many seconds of no keyboard/trackpad input. |
-| `MIN_RSSI` | `-75` | RSSI weaker than this is treated as absent. `-75` ≈ same room only; raise toward `-85` (or `-90`) for "anywhere in the home". |
+| `MIN_RSSI` | `-85` | RSSI weaker than this is treated as absent. `-85` ≈ "same room" with comfortable jitter headroom. `-75` is stricter but can false-trigger from natural BLE noise. |
+| `PRESENCE_GRACE_SECONDS` | `30` | If a device was present this many seconds ago, a momentary dropout (missing RSSI or below threshold) is treated as still present. Smooths BLE jitter and brief radio pauses (e.g. iPhone going dark during a phone call). |
 | `RESPECT_MEDIA_ASSERTION` | `1` | If `1`, skip locking while another app holds a `PreventUserIdleDisplaySleep` assertion (e.g. Zoom call, fullscreen video). |
 | `IGNORE_ASSERTION_PROCESSES` | `(Amphetamine caffeinate KeepingYouAwake Owly Theine)` | Process names whose `PreventUserIdleDisplaySleep` assertions are *ignored*. These tools exist to keep the display awake as their core function and should not be allowed to block a proximity lock. Add your own here if you use a different stay-awake utility. |
 

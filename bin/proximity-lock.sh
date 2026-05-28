@@ -22,8 +22,12 @@ PRESENCE_POLICY="all_absent"
 POLL_INTERVAL=3           # seconds between snapshots (system_profiler is fast)
 MISS_THRESHOLD=2          # consecutive failing snapshots before considering "away"
 IDLE_THRESHOLD=5          # require >= this many seconds of HID idle before locking
-MIN_RSSI=-75              # RSSI weaker than this is treated as absent
-                          # (-75 ≈ same room only; raise toward -85 if too aggressive)
+MIN_RSSI=-85              # RSSI weaker than this is treated as absent
+                          # (-85 ≈ same room with jitter headroom; -75 catches jitter)
+PRESENCE_GRACE_SECONDS=30 # If a device was present <= this many seconds ago, treat
+                          # a temporary dropout (missing RSSI or below threshold) as
+                          # still present. Smooths BLE jitter and brief radio pauses
+                          # (e.g. iPhone going dark during a call).
 RESPECT_MEDIA_ASSERTION=1 # 1 = skip lock while something prevents display sleep
 # Processes that hold a "keep display awake" assertion as their core function
 # rather than to signal media playback / a meeting. We ignore their assertions
@@ -128,14 +132,18 @@ snapshot() {
 
 # Per-cycle scan state, parallel to TRUSTED_MACS.
 TRUSTED_NAMES=()
-DEVICE_PRESENT=()
+DEVICE_PRESENT=()      # 1 if considered present (may be via grace), else 0
+DEVICE_GRACE=()        # 1 if PRESENT=1 is being held open by grace, else 0
 DEVICE_RSSI=()
-DEVICE_LAST_SEEN=()
+DEVICE_LAST_SEEN=()    # epoch of last sample showing RSSI (any value)
+DEVICE_LAST_GOOD_AT=() # epoch of last sample with RSSI >= MIN_RSSI
 for _ in "${TRUSTED_MACS[@]}"; do
     TRUSTED_NAMES+=("unknown")
     DEVICE_PRESENT+=(0)
+    DEVICE_GRACE+=(0)
     DEVICE_RSSI+=("")
     DEVICE_LAST_SEEN+=(0)
+    DEVICE_LAST_GOOD_AT+=(0)
 done
 
 normalize_mac() {
@@ -143,45 +151,65 @@ normalize_mac() {
 }
 
 scan_and_update_state() {
-    local snap addr rssi name i mac matched
+    local snap addr rssi name i mac matched now good_age
     snap="$(snapshot)"
+    now=$(date +%s)
 
     for i in "${!TRUSTED_MACS[@]}"; do
         mac="$(normalize_mac "${TRUSTED_MACS[i]}")"
         matched=0
+        DEVICE_GRACE[i]=0
         while IFS=$'\t' read -r addr rssi name; do
             [ -z "$addr" ] && continue
             if [ "$addr" = "$mac" ]; then
                 # Strip control chars and chars that would break KEY="value" parsing.
                 name="$(printf '%s' "$name" | LC_ALL=C tr -d $'\r\n"=')"
                 [ -n "$name" ] && TRUSTED_NAMES[i]="$name"
+                DEVICE_RSSI[i]="$rssi"
+                DEVICE_LAST_SEEN[i]="$now"
                 if [ "$rssi" -ge "$MIN_RSSI" ] 2>/dev/null; then
                     DEVICE_PRESENT[i]=1
-                    DEVICE_RSSI[i]="$rssi"
-                    DEVICE_LAST_SEEN[i]=$(date +%s)
-                else
-                    DEVICE_PRESENT[i]=0
-                    DEVICE_RSSI[i]="$rssi"
+                    DEVICE_LAST_GOOD_AT[i]="$now"
                 fi
                 matched=1
                 break
             fi
         done <<< "$snap"
         if [ "$matched" -eq 0 ]; then
-            DEVICE_PRESENT[i]=0
             DEVICE_RSSI[i]=""
+        fi
+
+        # If this poll didn't yield a "good" reading, check grace.
+        if [ "$matched" -eq 0 ] || ! [ "${DEVICE_RSSI[i]}" -ge "$MIN_RSSI" ] 2>/dev/null; then
+            good_age=$(( now - ${DEVICE_LAST_GOOD_AT[i]:-0} ))
+            if [ "${DEVICE_LAST_GOOD_AT[i]:-0}" -gt 0 ] && [ "$good_age" -le "$PRESENCE_GRACE_SECONDS" ]; then
+                DEVICE_PRESENT[i]=1
+                DEVICE_GRACE[i]=1
+            else
+                DEVICE_PRESENT[i]=0
+            fi
         fi
     done
 }
 
 # Format current per-device state for log output, e.g.:
-#   "iPhone=-78/absent, Watch=-45/present"
+#   "iPhone=-78/absent, Watch=-45/present, Phone=?/grace(12s)"
 devices_summary() {
-    local i parts=() name rssi pres
+    local i parts=() name rssi pres now good_age
+    now=$(date +%s)
     for i in "${!TRUSTED_MACS[@]}"; do
         name=${TRUSTED_NAMES[i]}
         rssi=${DEVICE_RSSI[i]:-?}
-        if [ "${DEVICE_PRESENT[i]}" = "1" ]; then pres=present; else pres=absent; fi
+        if [ "${DEVICE_PRESENT[i]}" = "1" ]; then
+            if [ "${DEVICE_GRACE[i]}" = "1" ]; then
+                good_age=$(( now - ${DEVICE_LAST_GOOD_AT[i]:-0} ))
+                pres="grace(${good_age}s)"
+            else
+                pres=present
+            fi
+        else
+            pres=absent
+        fi
         parts+=("$name=$rssi/$pres")
     done
     local IFS=', '
