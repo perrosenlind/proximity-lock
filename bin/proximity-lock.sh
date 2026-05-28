@@ -25,6 +25,16 @@ IDLE_THRESHOLD=5          # require >= this many seconds of HID idle before lock
 MIN_RSSI=-75              # RSSI weaker than this is treated as absent
                           # (-75 ≈ same room only; raise toward -85 if too aggressive)
 RESPECT_MEDIA_ASSERTION=1 # 1 = skip lock while something prevents display sleep
+# Processes that hold a "keep display awake" assertion as their core function
+# rather than to signal media playback / a meeting. We ignore their assertions
+# so the daemon still locks when devices leave. Add your own here as needed.
+IGNORE_ASSERTION_PROCESSES=(
+    "Amphetamine"
+    "caffeinate"
+    "KeepingYouAwake"
+    "Owly"
+    "Theine"
+)
 
 LOG="$HOME/Library/Logs/proximity-lock.log"
 STATUS_DIR="$HOME/Library/Application Support/proximity-lock"
@@ -59,7 +69,31 @@ hid_idle_seconds() {
 
 media_assertion_active() {
     [ "$RESPECT_MEDIA_ASSERTION" -eq 1 ] || return 1
-    "$PMSET" -g assertions | grep -Eq '^[[:space:]]+PreventUserIdleDisplaySleep[[:space:]]+1'
+
+    # Build a regex of process names to ignore (literal-anchored).
+    local ignore_re=""
+    if [ "${#IGNORE_ASSERTION_PROCESSES[@]}" -gt 0 ]; then
+        local IFS='|'
+        ignore_re="^(${IGNORE_ASSERTION_PROCESSES[*]})\$"
+    fi
+
+    # Extract process names holding PreventUserIdleDisplaySleep.
+    # pmset format:  "   pid 1139(Amphetamine): [...] ... PreventUserIdleDisplaySleep named: ..."
+    local holders
+    holders="$("$PMSET" -g assertions 2>/dev/null \
+        | grep -E '^[[:space:]]+pid [0-9]+\(' \
+        | grep -F 'PreventUserIdleDisplaySleep' \
+        | sed -E 's/.*pid [0-9]+\(([^)]+)\).*/\1/')"
+
+    [ -z "$holders" ] && return 1   # nothing holds it → not active
+
+    if [ -n "$ignore_re" ]; then
+        # Active only if some holder is NOT in the ignore list.
+        printf '%s\n' "$holders" | grep -E -v "$ignore_re" | grep -q .
+    else
+        # No ignore list configured → any holder counts as active.
+        return 0
+    fi
 }
 
 # Read a value from the plugin overrides file. Returns the default if unset
