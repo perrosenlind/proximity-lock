@@ -174,6 +174,20 @@ scan_and_update_state() {
     done
 }
 
+# Format current per-device state for log output, e.g.:
+#   "iPhone=-78/absent, Watch=-45/present"
+devices_summary() {
+    local i parts=() name rssi pres
+    for i in "${!TRUSTED_MACS[@]}"; do
+        name=${TRUSTED_NAMES[i]}
+        rssi=${DEVICE_RSSI[i]:-?}
+        if [ "${DEVICE_PRESENT[i]}" = "1" ]; then pres=present; else pres=absent; fi
+        parts+=("$name=$rssi/$pres")
+    done
+    local IFS=', '
+    echo "${parts[*]}"
+}
+
 absent_by_policy() {
     local present=0 i
     for i in "${!TRUSTED_MACS[@]}"; do
@@ -225,20 +239,25 @@ while true; do
     if absent_by_policy; then
         misses=$((misses + 1))
 
+        # First miss of a new sequence is the most diagnostic — log per-device.
+        if [ "$misses" -eq 1 ]; then
+            log "first miss — policy=$PRESENCE_POLICY  [$(devices_summary)]  idle=${idle}s"
+        fi
+
         if [ "$misses" -ge "$MISS_THRESHOLD" ] && [ "$locked" -eq 0 ]; then
             if media_assertion_active; then
-                log "trusted devices absent ($misses) but media assertion active — skipping"
+                log "absent ($misses), idle=${idle}s — SKIP (media assertion)  [$(devices_summary)]"
             elif [ "$idle" -lt "$IDLE_THRESHOLD" ]; then
-                log "trusted devices absent ($misses) but user active (idle=${idle}s < ${IDLE_THRESHOLD}s) — skipping"
+                log "absent ($misses), idle=${idle}s < ${IDLE_THRESHOLD}s — SKIP (user active)  [$(devices_summary)]"
             else
-                log "trusted devices absent ($misses), idle=${idle}s — locking"
+                log "absent ($misses), idle=${idle}s — LOCKING  [$(devices_summary)]"
                 lock_screen
                 locked=1
             fi
         fi
     else
         if [ "$misses" -ne 0 ] || [ "$locked" -ne 0 ]; then
-            log "trusted device(s) back in range — resetting"
+            log "back in range (after $misses miss(es))  [$(devices_summary)]"
         fi
         misses=0
         locked=0
